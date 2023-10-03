@@ -8,15 +8,12 @@ import (
 )
 
 type Config struct {
-	Scrapers map[string]ScraperConfig `toml:"scrapers"`
+	LocalPath string `toml:"path"`
+	Scraper   string `toml:"scraper"`
+	Threads   int    `toml:"threads"`
 }
 
-type ScraperConfig struct {
-	Type string `toml:"type"`
-	URL  string `toml:"url"`
-}
-
-func LoadFromFile(path string) (Config, error) {
+func Load(path string) (Config, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return Config{}, fmt.Errorf("open '%s': %w", path, err)

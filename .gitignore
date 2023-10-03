@@ -1,3 +1,4 @@
-*.ignore
+/local/
 *.exe
-/config.toml
+*.ignore
+*.local.toml

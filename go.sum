@@ -1,9 +1,16 @@
 github.com/BurntSushi/toml v1.3.2 h1:o7IhLm0Msx3BaB+n3Ag7L8EVlByGnpq14C4YWiu/gL8=
 github.com/BurntSushi/toml v1.3.2/go.mod h1:CxXYINrC8qIiEnFrOxCa7Jy5BFHlXnUU2pbicEuybxQ=
+github.com/danbrakeley/bsh v0.1.5 h1:ExCBg7JXS3TgK1QPC4dX5JGaO0auPocQlKlXT93a+EI=
+github.com/danbrakeley/bsh v0.1.5/go.mod h1:s6MsY0JONwbMmO6PucUyqTSULGTPTTdRMohD0iccFtA=
+github.com/danbrakeley/commandline v1.0.0 h1:9qOX7wnJxECT0ZEZav6P5/GVdX/xSsPnIwQ9ptpMUuc=
+github.com/danbrakeley/commandline v1.0.0/go.mod h1:TebcfPCZN3Dpc0DZMp68KTbVzCr07KCfAVkrYlLi2is=
 github.com/danbrakeley/frog v0.9.4 h1:G40G/L+iMjMnzc/R42OpR7SKTMgrePJYXdrqjz+d9iY=
 github.com/danbrakeley/frog v0.9.4/go.mod h1:p2AWOH3knZHylnQLcDqoR633mOi6UMpFVPzV9iTNPUg=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
+github.com/magefile/mage v1.11.0/go.mod h1:z5UZb/iS3GoOSn0JgWuiw7dxlurVYTu+/jHXqQg881A=
+github.com/magefile/mage v1.15.0 h1:BvGheCMAsG3bWUDbZ8AyXXpCNwU9u5CB6sM+HNb9HYg=
+github.com/magefile/mage v1.15.0/go.mod h1:z5UZb/iS3GoOSn0JgWuiw7dxlurVYTu+/jHXqQg881A=
 github.com/mattn/go-colorable v0.1.4/go.mod h1:U0ppj6V5qS13XJ6of8GYAs25YV2eR4EVcfRqFIhoBtE=
 github.com/mattn/go-isatty v0.0.8/go.mod h1:Iq45c/XA43vh69/j3iqttzPXn0bhXyGjM0Hdxcsrc5s=
 github.com/mattn/go-isatty v0.0.10/go.mod h1:qgIWMr58cqv1PHHyhnkY9lrL7etaEgOFcMEpPG5Rm84=

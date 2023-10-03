@@ -14,6 +14,7 @@ import (
 	"github.com/natefinch/atomic"
 )
 
+// DownloadOptions is used to configure DownloadToFile
 type DownloadOptions struct {
 	// ExpectedSize is the size in bytes that must be downloaded for this
 	// download to be succeed, or zero if the size is not known up front.
@@ -33,13 +34,30 @@ type DownloadOptions struct {
 	MaxRetry uint
 }
 
+// DownloadResults is returned by DownloadToFile
 type DownloadResults struct {
+	// ExpectedSize is the size we expected to download, from either
+	// DownloadOptions.ExpectedSize or the Content-Length header.
 	ExpectedSize int64
-	ActualSize   int64
+
+	// ActualSize is the size we actually downloaded.
+	ActualSize int64
+
+	// LastModified is the Last-Modified header we received from the server (or zero).
 	LastModified time.Time
-	Retries      uint
+
+	// Retries is the number of times we retried after an error.
+	Retries uint
 }
 
+// DownloadToFile downloads a file from a URL to a local path.
+// It writes to a temporary file in the same folder. Upon success, it moves
+// the file to its final location, overwritting any existing file.
+// If a Last-Modified timestamp was specified by either the user or the
+// Last-Modified server header, then the files modification time is set
+// to that value.
+// While downloading, any errors are retried according to the options.
+// Upon retry, the download is resumed from where it left off, if possible.
 func DownloadToFile(
 	log frog.Logger,
 	remoteURL string,
@@ -75,14 +93,8 @@ func DownloadToFile(
 	}
 	defer f.Close()
 
-	dc := downloadContext{
-		remoteURL: remoteURL,
-		opts:      opts,
-		bytesRead: 0,
-		curRetry:  0,
-	}
-
-	err = dc.downloadImpl(log, f, false)
+	dc := downloadContext{remoteURL: remoteURL, opts: opts}
+	err = dc.downloadImpl(log, f)
 	// this is useful to have up to date even if there's an error...
 	res.ExpectedSize = dc.opts.ExpectedSize
 	res.ActualSize = dc.bytesRead
@@ -115,14 +127,11 @@ type downloadContext struct {
 	opts      DownloadOptions
 	bytesRead int64
 	curRetry  uint
+	canResume bool
 }
 
 // downloadImpl does the downloading, including retrying and resuming
-func (dc *downloadContext) downloadImpl(
-	log frog.Logger,
-	f *os.File,
-	canResume bool,
-) error {
+func (dc *downloadContext) downloadImpl(log frog.Logger, f *os.File) error {
 	if dc.opts.MaxRetry > 0 && dc.curRetry >= dc.opts.MaxRetry {
 		return fmt.Errorf("max retries (%d) exceeded", dc.opts.MaxRetry)
 	}
@@ -132,7 +141,7 @@ func (dc *downloadContext) downloadImpl(
 		return fmt.Errorf("create request: %w", err)
 	}
 
-	if canResume && dc.bytesRead > 0 {
+	if dc.canResume && dc.bytesRead > 0 {
 		log.Verbose("resume download",
 			frog.Int64("start", dc.bytesRead),
 			frog.Int64("total", dc.opts.ExpectedSize),
@@ -150,27 +159,30 @@ func (dc *downloadContext) downloadImpl(
 		)
 	}
 
+	// this wrapper func will be used going forward to handle errors that we may be
+	// able to ignore by retrying the request, assuming we still have retries left
 	fnRetryOrErr := func(err error) error {
+		// if we have no retries left, then this is the error we'll return
 		dc.curRetry += 1
 		if dc.opts.MaxRetry > 0 && dc.curRetry >= dc.opts.MaxRetry {
 			return err
 		}
 
-		// backoff
+		// we want to retry! first, backoff.
 		d := backoff(dc.curRetry)
-		log.Verbose("pausing before retry",
+		log.Verbose("error, but will retry",
 			frog.Dur("backoff", d),
-			frog.Err(err),
 			frog.Int64("bytes_read", dc.bytesRead),
 			frog.Int64("size", dc.opts.ExpectedSize),
 			frog.Uint("cur_retry", dc.curRetry),
 			frog.Uint("max_retry", dc.opts.MaxRetry),
 			frog.String("url", dc.remoteURL),
+			frog.Err(err),
 		)
 		time.Sleep(d)
 
-		// and retry, as appropriate
-		return dc.downloadImpl(log, f, canResume)
+		// and retry
+		return dc.downloadImpl(log, f)
 	}
 
 	// begin request
@@ -180,14 +192,18 @@ func (dc *downloadContext) downloadImpl(
 	}
 	defer resp.Body.Close()
 
-	// parse headers and validate assumptions
+	// before parsing the body, parse the response headers
 
-	if !canResume {
-		canResume = parseCanResume(resp.Header)
+	// If we already know we can resume, then don't check for the header again.
+	// This is because some (all?) servers don't include the Accept-Ranges header
+	// in the response when the request includes a Range header.
+	if !dc.canResume {
+		dc.canResume = resp.Header.Get("Accept-Ranges") == "bytes"
 	}
 
-	if !canResume && dc.bytesRead > 0 {
-		// we expected to resume, but the server doesn't support it, so drop the previously downloaded data
+	// if we've previously read bytes, then we're hoping to resume...
+	if dc.bytesRead > 0 && !dc.canResume {
+		// ... but if we can't resume, then we need to truncate the read bytes
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
 			return fmt.Errorf("seek to start: %w", err)
 		}
@@ -206,7 +222,7 @@ func (dc *downloadContext) downloadImpl(
 
 	cl := parseContentLength(resp.Header)
 	if cl > 0 {
-		if canResume {
+		if dc.canResume {
 			if dc.opts.ExpectedSize > 0 {
 				expectedCl := dc.opts.ExpectedSize - dc.bytesRead
 				if cl != expectedCl {
@@ -232,7 +248,7 @@ func (dc *downloadContext) downloadImpl(
 		}
 	}
 
-	// download file contents
+	// download file contents (parse the body)
 	pw := newProgressWriter(log, dc.remoteURL, dc.opts.ExpectedSize-dc.bytesRead)
 	n, err := io.Copy(io.MultiWriter(f, pw), resp.Body)
 	dc.bytesRead += n
@@ -243,7 +259,7 @@ func (dc *downloadContext) downloadImpl(
 		return fnRetryOrErr(fmt.Errorf("download: %w", err))
 	}
 
-	// properly close the body, dealing with any errors
+	// close the body (don't ignore errors)
 	if err := resp.Body.Close(); err != nil {
 		return fmt.Errorf("close response body: %w", err)
 	}
@@ -315,13 +331,6 @@ func intPow[N int | int32 | int64 | uint | uint32 | uint64](base, exp N) N {
 		base *= base
 	}
 	return result
-}
-
-// Header parsing helpers
-
-// parseCanResume returns true if the Accept-Ranges header is present and set to "bytes"
-func parseCanResume(h http.Header) bool {
-	return h.Get("Accept-Ranges") == "bytes"
 }
 
 // parseContentLength returns -1 if the header is not present or cannot be parsed
