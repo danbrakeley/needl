@@ -15,7 +15,7 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           goos: windows
           goarch: amd64
-          goversion: "1.21"
+          goversion: "go.mod"
           project_path: "./cmd/needl"
           extra_files: LICENSE.txt README.md
           ldflags:

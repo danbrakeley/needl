@@ -5,12 +5,11 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-22.04, windows-2019]
-        go-ver: ["1.21"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-go@v4
         with:
-          go-version: ${{ matrix.go-ver }}
+          go-version-file: go.mod
       - run: go test ./...
       - run: go build ./cmd/needl
