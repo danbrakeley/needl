@@ -368,19 +368,14 @@ func getSortedLocals(path string) ([]LocalFile, error) {
 }
 
 func getSortedRemotes(scfg config.Scraper) ([]scraper.RemoteFile, error) {
-	var scrpr scraper.Scraper
-	switch scfg.Type {
-	case "archive.org":
-		scrpr = scraper.ArchiveDotOrg{
-			BaseURL: scfg.URL,
-		}
-	default:
-		return nil, fmt.Errorf("unknown scraper type '%s'", scfg.Type)
+	s, err := scraper.Create(scfg.Type, scraper.Params{BaseURL: scfg.URL})
+	if err != nil {
+		return nil, fmt.Errorf("error creating scraper of type '%s': %w", scfg.Type, err)
 	}
 
-	remotes, err := scrpr.ScrapeRemotes()
+	remotes, err := s.ScrapeRemotes()
 	if err != nil {
-		return nil, fmt.Errorf("error scraping for files: %w", err)
+		return nil, fmt.Errorf("error while scraping: %w", err)
 	}
 
 	sort.Slice(remotes, func(i, j int) bool {

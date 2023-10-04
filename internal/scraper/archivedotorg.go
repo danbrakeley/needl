@@ -16,6 +16,17 @@ type ArchiveDotOrg struct {
 	UserAgent string
 }
 
+func init() {
+	Register("archive.org", func(name string, params Params) (Scraper, error) {
+		if len(params.BaseURL) == 0 {
+			return nil, fmt.Errorf("missing param: BaseURL")
+		}
+		return &ArchiveDotOrg{
+			BaseURL: params.BaseURL,
+		}, nil
+	})
+}
+
 var archiveDotOrgFileLineRE = regexp.MustCompile(`^<a href="([^"]+)">.*<\/a>\s+([0-9]+\-[a-zA-Z]+\-[0-9]+ [0-9]+:[0-9]+)\s+([0-9]+)$`)
 
 func (n ArchiveDotOrg) ScrapeRemotes() ([]RemoteFile, error) {
