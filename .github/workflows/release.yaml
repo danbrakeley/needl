@@ -1,0 +1,25 @@
+name: build release zip
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  release:
+    name: Release Go Binary
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v3
+      - uses: wangyoucao577/go-release-action@v1.40
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          goos: windows
+          goarch: amd64
+          goversion: "1.21"
+          project_path: "./cmd/needl"
+          extra_files: LICENSE.txt README.md
+          ldflags:
+            '-X "github.com/danbrakeley/needl/internal/buildvar.Version=${{ github.event.release.tag_name }}"
+            -X "github.com/danbrakeley/needl/internal/buildvar.BuildTime=${{ github.event.release.created_at
+            }}" -X "github.com/danbrakeley/needl/internal/buildvar.ReleaseURL=${{
+            github.event.release.html_url }}"'
