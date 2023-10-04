@@ -52,7 +52,8 @@ func PrintUsage() {
 			"\t-c, --config PATH     Config TOML file (default: '%s')",
 			"\t    --scrapers PATH   Scrapers TOML file (default: '%s')",
 			"\t-t, --threads NUM     Max number of concurrent downloads (default: '%d')",
-			"\t-v, --version         Print just the version number (to stdout)",
+			"\t-v, --verbose         Extra output (for debugging)",
+			"\t    --version         Print just the version number (to stdout)",
 			"\t-h, --help            Print this message (to stderr)",
 			"",
 		}, "\n"), version, buildTime, url, defaultConfigPath, defaultScrapersPath, defaultThreadCount,
@@ -77,8 +78,6 @@ type LocalFile struct {
 	Size      int64
 }
 
-var log frog.RootLogger
-
 func mainExit() int {
 	start := time.Now()
 	flag.Usage = PrintUsage
@@ -86,6 +85,7 @@ func mainExit() int {
 	var configPath string
 	var scrapersPath string
 	var threadCount int
+	var verbose bool
 	var showVersion bool
 	var showHelp bool
 	flag.StringVar(&configPath, "config", defaultConfigPath, "path to optional config file")
@@ -93,7 +93,8 @@ func mainExit() int {
 	flag.StringVar(&scrapersPath, "scrapers", defaultScrapersPath, "path to scrapers file")
 	flag.IntVar(&threadCount, "threads", 0, "number of simultaneous downloads")
 	flag.IntVar(&threadCount, "t", 0, "number of simultaneous downloads")
-	flag.BoolVar(&showVersion, "v", false, "show version info")
+	flag.BoolVar(&verbose, "v", false, "extra logging for debugging")
+	flag.BoolVar(&verbose, "verbose", false, "extra logging for debugging")
 	flag.BoolVar(&showVersion, "version", false, "show version info")
 	flag.BoolVar(&showHelp, "h", false, "show this help message")
 	flag.BoolVar(&showHelp, "help", false, "show this help message")
@@ -119,8 +120,10 @@ func mainExit() int {
 		return 1
 	}
 
-	log = frog.New(frog.Auto, frog.POFieldIndent(26))
-	log.SetMinLevel(frog.Verbose)
+	log := frog.New(frog.Auto, frog.POFieldIndent(26))
+	if verbose {
+		log.SetMinLevel(frog.Verbose)
+	}
 	defer func() {
 		dur := time.Now().Sub(start)
 		log.Info("Done", frog.Dur("time", dur))
@@ -133,11 +136,10 @@ func mainExit() int {
 	scraperName = flag.Arg(0)
 	dstPath = flag.Arg(1)
 
-	abs, _ := filepath.Abs(configPath)
-	log.Info("Loading config...", frog.String("path", configPath), frog.String("abs", abs))
+	log.Info("Loading config...", frog.Path(configPath))
 	cfg, err := config.Load(configPath)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		log.Error("loading config", frog.String("path", configPath), frog.Err(err))
+		log.Error("loading config", frog.PathAbs(configPath), frog.Err(err))
 		return 5
 	}
 
@@ -153,25 +155,33 @@ func mainExit() int {
 	} else if cfg.Threads == 0 {
 		cfg.Threads = defaultThreadCount
 	}
+	if verbose {
+		cfg.Verbose = true
+	}
+	// now that the config is loaded, ensure the log level is set properly
+	if cfg.Verbose {
+		log.SetMinLevel(frog.Verbose)
+	} else {
+		log.SetMinLevel(frog.Info)
+	}
 
-	abs, _ = filepath.Abs(scrapersPath)
-	log.Info("Loading scrapers...", frog.String("path", scrapersPath), frog.String("abs", abs))
+	log.Info("Loading scrapers...", frog.Path(scrapersPath))
 	scrapers, err := config.LoadScrapers(scrapersPath)
 	if err != nil {
-		log.Error("loading scrapers", frog.String("path", scrapersPath), frog.Err(err))
+		log.Error("loading scrapers", frog.PathAbs(scrapersPath), frog.Err(err))
 		return 6
 	}
 
 	scfg, ok := scrapers[cfg.Scraper]
 	if !ok {
-		log.Error("scraper not found", frog.String("name", cfg.Scraper), frog.String("scrapers_file", scrapersPath))
+		log.Error("scraper not found", frog.String("name", cfg.Scraper), frog.PathAbs(scrapersPath))
 		log.Close()
 		flag.CommandLine.SetOutput(os.Stderr)
 		flag.Usage()
 		if len(scrapers) == 0 {
-			fmt.Fprintf(os.Stderr, "\nno scrapers found in %s\n", scrapersPath)
+			fmt.Fprintf(os.Stderr, "\nno scrapers found in %s\n", filepath.ToSlash(scrapersPath))
 		} else {
-			fmt.Fprintf(os.Stderr, "\navailable scrapers (from %s):\n", scrapersPath)
+			fmt.Fprintf(os.Stderr, "\navailable scrapers (from %s):\n", filepath.ToSlash(scrapersPath))
 			for k := range scrapers {
 				fmt.Fprintf(os.Stderr, "\t%s\n", k)
 			}
@@ -181,22 +191,13 @@ func mainExit() int {
 
 	// ensure local path exists
 	if err := os.MkdirAll(cfg.LocalPath, 0o755); err != nil {
-		log.Error("creating local path", frog.String("path", cfg.LocalPath), frog.Err(err))
+		log.Error("creating local path", frog.PathAbs(cfg.LocalPath), frog.Err(err))
 	}
 
-	abs, _ = filepath.Abs(cfg.LocalPath)
-	log.Info("Listing local files...", frog.String("path", cfg.LocalPath), frog.String("abs", abs))
-	locals, err := getSortedLocals(cfg.LocalPath)
-	if err != nil {
-		log.Error("list local files", frog.Err(err))
-		return 20
-	}
-
-	log.Info("Listing remote files...", frog.String("url", scfg.URL))
-	remotes, err := getSortedRemotes(scfg)
-	if err != nil {
-		log.Error("list remote files", frog.Err(err))
-		return 30
+	// list local and remote files
+	locals, remotes, errno := listFiles(log, cfg, scfg)
+	if errno > 0 {
+		return errno
 	}
 
 	// diff local vs remote
@@ -251,34 +252,38 @@ func mainExit() int {
 	for i := 0; i < cfg.Threads; i++ {
 		go func() {
 			for r := range ch {
-				log.Info("Downloading",
-					frog.String("name", r.Name), frog.String("url", r.URL),
-					frog.Time("time", r.Timestamp), frog.Int64("size", r.Size),
+				log.Info("Start download",
+					frog.String("name", r.Name), frog.Int64("size", r.Size),
+					frog.Time("time", r.Timestamp), frog.String("url", r.URL),
 				)
-				res, err := DownloadToFile(log, r.URL, filepath.Join(cfg.LocalPath, r.Name),
+				path := filepath.Join(cfg.LocalPath, r.Name)
+				res, err := DownloadToFile(log, r.URL, path,
 					DownloadOptions{ExpectedSize: r.Size, ExpectedLastModified: r.Timestamp},
 				)
 				if err != nil {
 					log.Error("unrecoverable error",
-						frog.String("name", r.Name), frog.String("url", r.URL),
-						frog.Time("time", res.LastModified), frog.Int64("size", res.ActualSize),
-						frog.Err(err),
+						frog.String("name", r.Name), frog.Int64("size", res.ActualSize),
+						frog.Time("time", res.LastModified), frog.String("url", r.URL),
+						frog.PathAbs(path), frog.Err(err),
 					)
 					continue
 				}
-				log.Info("Download complete", frog.String("name", r.Name),
+				log.Info("File written", frog.String("name", r.Name),
 					frog.Time("time", r.Timestamp), frog.Int64("size", r.Size),
+					frog.Path(path),
 				)
 			}
 			wg.Done()
 		}()
 	}
 
-	for _, v := range changed {
-		log.Info("Queuing changed file", frog.String("name", v.Name))
-	}
-	for _, v := range missing {
-		log.Info("Queuing missing file", frog.String("name", v.Name))
+	if cfg.Verbose {
+		for _, v := range changed {
+			log.Verbose("queuing changed file", frog.String("name", v.Name))
+		}
+		for _, v := range missing {
+			log.Verbose("queuing missing file", frog.String("name", v.Name))
+		}
 	}
 
 	// feed work to the workers
@@ -295,6 +300,43 @@ func mainExit() int {
 	wg.Wait()
 
 	return 0
+}
+
+// listFiles concurrently lists both the local and remote files
+func listFiles(log frog.Logger, cfg config.Config, scfg config.Scraper) ([]LocalFile, []scraper.RemoteFile, int) {
+	var locals []LocalFile
+	var errLocal error
+	var remotes []scraper.RemoteFile
+	var errRemote error
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		log.Info("Listing local files...", frog.Path(cfg.LocalPath))
+		locals, errLocal = getSortedLocals(cfg.LocalPath)
+	}()
+
+	go func() {
+		defer wg.Done()
+		log.Info("Listing remote files...", frog.String("url", scfg.URL))
+		remotes, errRemote = getSortedRemotes(scfg)
+	}()
+
+	wg.Wait()
+
+	if errLocal != nil {
+		log.Error("list local files", frog.Err(errLocal), frog.PathAbs(cfg.LocalPath))
+		return nil, nil, 20
+	}
+
+	if errRemote != nil {
+		log.Error("list remote files", frog.Err(errRemote), frog.String("url", scfg.URL))
+		return nil, nil, 30
+	}
+
+	return locals, remotes, 0
 }
 
 func getSortedLocals(path string) ([]LocalFile, error) {

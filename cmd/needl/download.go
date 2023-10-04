@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -85,7 +86,7 @@ func DownloadToFile(
 	}
 
 	tmpPath := localPath + ".tmp"
-	log.Verbose("creating file", frog.String("path", tmpPath))
+	log.Verbose("creating file", frog.PathAbs(tmpPath))
 
 	f, err := os.Create(tmpPath)
 	if err != nil {
@@ -109,13 +110,19 @@ func DownloadToFile(
 		return res, fmt.Errorf("close file: %w", err)
 	}
 
-	log.Transient("moving", frog.String("dst", localPath), frog.String("src", tmpPath))
+	log.Transient("moving",
+		frog.String("dst", filepath.ToSlash(localPath)),
+		frog.String("src", filepath.ToSlash(tmpPath)),
+	)
 	if err := atomic.ReplaceFile(tmpPath, localPath); err != nil {
+		log.Verbose("moving from", frog.PathAbs(tmpPath))
+		log.Verbose("moving to", frog.PathAbs(localPath))
 		return res, fmt.Errorf("move: %w", err)
 	}
 
-	log.Transient("setting file time", frog.Time("time", res.LastModified), frog.String("name", localPath))
+	log.Transient("setting file time", frog.Time("time", res.LastModified), frog.Path(localPath))
 	if err := modifyFileTime(localPath, res.LastModified); err != nil {
+		log.Verbose("modify file time", frog.PathAbs(localPath), frog.Time("new_time", res.LastModified))
 		return res, fmt.Errorf("set time failed: %w", err)
 	}
 
@@ -298,7 +305,6 @@ func (pw *progressWriter) Write(p []byte) (int, error) {
 		pw.log.Transient(
 			"download progress",
 			frog.String("total", pw.totalStr),
-			// frog.Int64("progress", pw.Progress),
 			frog.String("percent", fmt.Sprintf("%.2f%%", float64(pw.progress)/float64(pw.total)*100)),
 			frog.String("url", pw.remoteURL),
 		)

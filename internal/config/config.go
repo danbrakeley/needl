@@ -11,6 +11,7 @@ type Config struct {
 	LocalPath string `toml:"path"`
 	Scraper   string `toml:"scraper"`
 	Threads   int    `toml:"threads"`
+	Verbose   bool   `toml:"verbose"`
 }
 
 func Load(path string) (Config, error) {

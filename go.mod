@@ -5,7 +5,7 @@ go 1.21.1
 require (
 	github.com/BurntSushi/toml v1.3.2
 	github.com/danbrakeley/bsh v0.1.5
-	github.com/danbrakeley/frog v0.9.4
+	github.com/danbrakeley/frog v0.9.5
 	github.com/dustin/go-humanize v1.0.1
 	github.com/natefinch/atomic v1.0.1
 )
