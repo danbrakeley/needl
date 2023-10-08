@@ -17,26 +17,20 @@ type Scraper interface {
 	ScrapeRemotes() ([]RemoteFile, error)
 }
 
-// Params is a union of all parameters that any scraper type might require.
-// Each scraper type may require or ignore any of these parameters.
-type Params struct {
-	BaseURL string
-}
-
-var scraperFactory = map[string]func(string, Params) (Scraper, error){}
+var scraperFactory = map[string]func(string, ...Option) (Scraper, error){}
 
 // Register adds the given scraper type and that type's creation method.
-func Register(typ string, createFn func(string, Params) (Scraper, error)) {
+func Register(typ string, createFn func(string, ...Option) (Scraper, error)) {
 	scraperFactory[typ] = createFn
 }
 
 // Create looks up the given scraper type and returns a new instance of it.
-func Create(typ string, params Params) (Scraper, error) {
+func Create(typ string, opts ...Option) (Scraper, error) {
 	factory, ok := scraperFactory[typ]
 	if !ok {
 		return nil, fmt.Errorf("type not found")
 	}
-	return factory(typ, params)
+	return factory(typ, opts...)
 }
 
 // ListTypeNames returns a list of all registered scraper types.

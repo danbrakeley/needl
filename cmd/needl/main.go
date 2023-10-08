@@ -201,44 +201,7 @@ func mainExit() int {
 	}
 
 	// diff local vs remote
-	// both lists are sorted, so the diff is at worst O(n+m)
-	extra := make([]LocalFile, 0, len(locals))
-	missing := make([]scraper.RemoteFile, 0, len(remotes))
-	changed := make([]scraper.RemoteFile, 0, len(remotes))
-	i, j := 0, 0
-	for i < len(locals) && j < len(remotes) {
-		local := locals[i]
-		remote := remotes[j]
-
-		if local.SortName < remote.SortName {
-			extra = append(extra, local)
-			i++
-			continue
-		}
-
-		if local.SortName > remote.SortName {
-			missing = append(missing, remote)
-			j++
-			continue
-		}
-
-		if !local.Timestamp.Equal(remote.Timestamp) || local.Size != remote.Size {
-			changed = append(changed, remote)
-		}
-
-		i++
-		j++
-	}
-
-	for i < len(locals) {
-		extra = append(extra, locals[i])
-		i++
-	}
-
-	for j < len(remotes) {
-		missing = append(missing, remotes[j])
-		j++
-	}
+	extra, missing, changed := diffSortedFiles(locals, remotes)
 
 	// call out files that are local-only
 	for _, v := range extra {
@@ -368,7 +331,7 @@ func getSortedLocals(path string) ([]LocalFile, error) {
 }
 
 func getSortedRemotes(scfg config.Scraper) ([]scraper.RemoteFile, error) {
-	s, err := scraper.Create(scfg.Type, scraper.Params{BaseURL: scfg.URL})
+	s, err := scraper.Create(scfg.Type, scraper.BaseURL(scfg.URL))
 	if err != nil {
 		return nil, fmt.Errorf("error creating scraper of type '%s': %w", scfg.Type, err)
 	}
@@ -383,4 +346,58 @@ func getSortedRemotes(scfg config.Scraper) ([]scraper.RemoteFile, error) {
 	})
 
 	return remotes, nil
+}
+
+// diffSortedFiles compares two sorted lists of files and returns the differences.
+// Because the input is already sorted, this diff has a linear running time.
+// If the remote file has no timestamp or size, then those fields are ignored.
+func diffSortedFiles(
+	locals []LocalFile,
+	remotes []scraper.RemoteFile,
+) (
+	extra []LocalFile,
+	missing []scraper.RemoteFile,
+	changed []scraper.RemoteFile,
+) {
+	extra = make([]LocalFile, 0, len(locals))
+	missing = make([]scraper.RemoteFile, 0, len(remotes))
+	changed = make([]scraper.RemoteFile, 0, len(remotes))
+	i, j := 0, 0
+	for i < len(locals) && j < len(remotes) {
+		local := locals[i]
+		remote := remotes[j]
+
+		if local.SortName < remote.SortName {
+			extra = append(extra, local)
+			i++
+			continue
+		}
+
+		if local.SortName > remote.SortName {
+			missing = append(missing, remote)
+			j++
+			continue
+		}
+
+		if !remote.Timestamp.IsZero() && !local.Timestamp.Equal(remote.Timestamp) {
+			changed = append(changed, remote)
+		} else if remote.Size > 0 && local.Size != remote.Size {
+			changed = append(changed, remote)
+		}
+
+		i++
+		j++
+	}
+
+	for i < len(locals) {
+		extra = append(extra, locals[i])
+		i++
+	}
+
+	for j < len(remotes) {
+		missing = append(missing, remotes[j])
+		j++
+	}
+
+	return extra, missing, changed
 }

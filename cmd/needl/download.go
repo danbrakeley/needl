@@ -137,8 +137,13 @@ type downloadContext struct {
 	canResume bool
 }
 
+type WriteSeekTruncater interface {
+	io.WriteSeeker
+	Truncate(size int64) error
+}
+
 // downloadImpl does the downloading, including retrying and resuming
-func (dc *downloadContext) downloadImpl(log frog.Logger, f *os.File) error {
+func (dc *downloadContext) downloadImpl(log frog.Logger, f WriteSeekTruncater) error {
 	if dc.opts.MaxRetry > 0 && dc.curRetry >= dc.opts.MaxRetry {
 		return fmt.Errorf("max retries (%d) exceeded", dc.opts.MaxRetry)
 	}
